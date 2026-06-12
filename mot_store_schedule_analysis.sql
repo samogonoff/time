@@ -1,16 +1,11 @@
 -- ============================================================
--- Анализ mot_store_schedule: сравнение plan_value/fact_value
--- с plan_time/fact_time
--- 
--- Задача: посчитать часы по клиенту и месяцу двумя способами
---   Вариант 1: Сумма числовых значений plan_value / fact_value
---   Вариант 2: Парсинг интервалов plan_time / fact_time ("HH:MM-HH:MM")
---
--- Разница = обеденный перерыв (обычно 1 час)
+-- Анализ mot_store_schedule + план/факт время для Table_Fin_PL
 -- ============================================================
 
+-- Связь: mot_store_schedule.klient_id = 001 CodeCFO.CodeCFO = Table_Fin_PL.CodeCFO
+
 -- ============================================================
--- 1. Структура таблицы
+-- 1. Структура таблицы mot_store_schedule
 -- ============================================================
 SELECT 
     c.ORDINAL_POSITION,
@@ -79,115 +74,141 @@ WHERE TRY_CAST(fact_value AS decimal) IS NULL
 ORDER BY code;
 
 -- ============================================================
--- 5. ОСНОВНОЙ ЗАПРОС: сравнение двух подходов
---    Агрегация по (year_num, month_num, klient_id)
+-- 5. Агрегация часов из mot_store_schedule по магазину+месяцу
+--    (используется как CTE для JOIN в основной запрос)
 -- ============================================================
-WITH parsed AS (
+WITH store_hours AS (
     SELECT 
-        year_num, 
-        month_num, 
         klient_id,
+        year_num,
+        month_num,
 
-        -- Вариант 1: числовое значение (NULL для буквенных кодов)
-        TRY_CAST(plan_value AS decimal(10,4)) AS plan_val_num,
-        TRY_CAST(fact_value AS decimal(10,4)) AS fact_val_num,
+        -- plan: сумма чисел и сумма часов из интервалов
+        ROUND(SUM(TRY_CAST(plan_value AS decimal(10,4))), 4)  AS plan_hours_numeric,
+        ROUND(SUM(
+            CASE 
+                WHEN plan_time IS NOT NULL AND CHARINDEX('-', plan_time) > 0 THEN
+                    DATEDIFF(MINUTE, 
+                        TRY_CAST(LEFT(plan_time, 5) AS time),
+                        TRY_CAST(SUBSTRING(plan_time, CHARINDEX('-', plan_time) + 1, 5) AS time)
+                    ) / 60.0
+                ELSE NULL 
+            END
+        ), 4) AS plan_hours_shift,
 
-        -- Вариант 2: часы из временного интервала
-        -- Формат: "HH:MM-HH:MM" → DATEDIFF в минутах / 60
-        CASE 
-            WHEN plan_time IS NOT NULL AND CHARINDEX('-', plan_time) > 0 THEN
-                DATEDIFF(MINUTE, 
-                    TRY_CAST(LEFT(plan_time, 5) AS time),
-                    TRY_CAST(SUBSTRING(plan_time, CHARINDEX('-', plan_time) + 1, 5) AS time)
-                ) / 60.0
-            ELSE NULL 
-        END AS plan_time_hours,
+        -- fact: сумма чисел и сумма часов из интервалов
+        ROUND(SUM(TRY_CAST(fact_value AS decimal(10,4))), 4)  AS fact_hours_numeric,
+        ROUND(SUM(
+            CASE 
+                WHEN fact_time IS NOT NULL AND CHARINDEX('-', fact_time) > 0 THEN
+                    DATEDIFF(MINUTE, 
+                        TRY_CAST(LEFT(fact_time, 5) AS time),
+                        TRY_CAST(SUBSTRING(fact_time, CHARINDEX('-', fact_time) + 1, 5) AS time)
+                    ) / 60.0
+                ELSE NULL 
+            END
+        ), 4) AS fact_hours_shift,
 
-        CASE 
-            WHEN fact_time IS NOT NULL AND CHARINDEX('-', fact_time) > 0 THEN
-                DATEDIFF(MINUTE, 
-                    TRY_CAST(LEFT(fact_time, 5) AS time),
-                    TRY_CAST(SUBSTRING(fact_time, CHARINDEX('-', fact_time) + 1, 5) AS time)
-                ) / 60.0
-            ELSE NULL 
-        END AS fact_time_hours
+        COUNT(*) AS employee_days
 
     FROM mfportal.dbo.mot_store_schedule
+    GROUP BY klient_id, year_num, month_num
+)
+SELECT * FROM store_hours
+ORDER BY klient_id, year_num, month_num;
+
+-- ============================================================
+-- 6. ОСНОВНОЙ ЗАПРОС: Table_Fin_PL с плановым и фактическим временем
+--    Добавлены колонки plan_hours_numeric, plan_hours_shift,
+--    fact_hours_numeric, fact_hours_shift, employee_days
+-- ============================================================
+WITH store_hours AS (
+    SELECT 
+        klient_id,
+        year_num,
+        month_num,
+        ROUND(SUM(TRY_CAST(plan_value AS decimal(10,4))), 4)  AS plan_hours_numeric,
+        ROUND(SUM(
+            CASE 
+                WHEN plan_time IS NOT NULL AND CHARINDEX('-', plan_time) > 0 THEN
+                    DATEDIFF(MINUTE, 
+                        TRY_CAST(LEFT(plan_time, 5) AS time),
+                        TRY_CAST(SUBSTRING(plan_time, CHARINDEX('-', plan_time) + 1, 5) AS time)
+                    ) / 60.0
+                ELSE NULL 
+            END
+        ), 4) AS plan_hours_shift,
+        ROUND(SUM(TRY_CAST(fact_value AS decimal(10,4))), 4)  AS fact_hours_numeric,
+        ROUND(SUM(
+            CASE 
+                WHEN fact_time IS NOT NULL AND CHARINDEX('-', fact_time) > 0 THEN
+                    DATEDIFF(MINUTE, 
+                        TRY_CAST(LEFT(fact_time, 5) AS time),
+                        TRY_CAST(SUBSTRING(fact_time, CHARINDEX('-', fact_time) + 1, 5) AS time)
+                    ) / 60.0
+                ELSE NULL 
+            END
+        ), 4) AS fact_hours_shift,
+        COUNT(*) AS employee_days
+    FROM mfportal.dbo.mot_store_schedule
+    GROUP BY klient_id, year_num, month_num
 )
 SELECT 
-    year_num,
-    month_num,
-    klient_id,
-    COUNT(*) AS row_count,
+    [Dr_Cr]
+    ,t.[CodePL]
+    ,t.[Country]
+    ,[Month]
+    ,[ВГО]
+    ,SUM([AmountBYN]) AS AmountBYN
+    ,SUM([Amount]) AS Amount
+    ,SUM([AmountUSD]) AS AmountUSD
+    ,SUM([AmountRUB]) AS AmountRUB
+    ,[Scenario]
+    ,t.[CodeCFO]
+    ,t.[CFO]
+    ,t.[GroupCFO1]
+    ,t.[GroupCFO2]
+    ,t.[GroupCFO3]
+    ,[Метод.нюансы]
+    ,[Для отчета]
+    ,[GroupPL_new]
+    ,[CF_item]
+    ,[LFL_LISA]
+    ,SUM([discount_amount_vat_BYN]) AS discount_amount_vat_BYN
+    ,SUM([markdown_amount_vat_BYN]) AS markdown_amount_vat_BYN
+    ,pl.GroupPL
+    ,pl.Expense
+    ,cf.Ploschad
+    ,[RegManager]
+    ,[DateOpen]
+    ,[LfLStatus]
+    ,[Компания]
 
-    -- plan: числа vs интервалы
-    ROUND(SUM(plan_val_num), 4)    AS plan_sum_numeric,
-    ROUND(SUM(plan_time_hours), 4) AS plan_sum_time,
-    ROUND(SUM(plan_time_hours) - SUM(plan_val_num), 4) AS plan_delta,
+    -- ==========================================
+    -- Добавленные колонки планового/факт времени
+    -- ==========================================
+    ,COALESCE(sh.plan_hours_numeric, 0) AS plan_hours_numeric  -- чистые рабочие часы (без обеда)
+    ,COALESCE(sh.plan_hours_shift, 0)   AS plan_hours_shift    -- время присутствия на смене (с обедом)
+    ,COALESCE(sh.fact_hours_numeric, 0) AS fact_hours_numeric  -- чистые рабочие часы (без обеда)
+    ,COALESCE(sh.fact_hours_shift, 0)   AS fact_hours_shift    -- время присутствия на смене (с обедом)
+    ,COALESCE(sh.employee_days, 0)      AS employee_days       -- количество человеко-дней
 
-    -- fact: числа vs интервалы  
-    ROUND(SUM(fact_val_num), 4)    AS fact_sum_numeric,
-    ROUND(SUM(fact_time_hours), 4) AS fact_sum_time,
-    ROUND(SUM(fact_time_hours) - SUM(fact_val_num), 4) AS fact_delta
+FROM [FinDWH].[dbo].[Table_Fin_PL] t
+LEFT JOIN [dbo].[002 CodePL] pl ON t.CodePL = pl.CodePL
+LEFT JOIN [dbo].[001 CodeCFO] cf ON t.CodeCFO = cf.CodeCFO
 
-FROM parsed
-GROUP BY year_num, month_num, klient_id
-ORDER BY year_num, month_num, klient_id;
+-- LEFT JOIN агрегированных часов из mot_store_schedule
+-- Связь: mot_store_schedule.klient_id = 001 CodeCFO.CodeCFO = Table_Fin_PL.CodeCFO
+LEFT JOIN store_hours sh 
+    ON CAST(sh.klient_id AS NVARCHAR(22)) = t.CodeCFO
+    AND sh.year_num = YEAR(t.Month)
+    AND sh.month_num = MONTH(t.Month)
 
--- ============================================================
--- 6. Итоговые суммы по всей таблице
--- ============================================================
-WITH parsed AS (
-    SELECT 
-        TRY_CAST(plan_value AS decimal(10,4)) AS plan_val_num,
-        TRY_CAST(fact_value AS decimal(10,4)) AS fact_val_num,
-        CASE 
-            WHEN plan_time IS NOT NULL AND CHARINDEX('-', plan_time) > 0 THEN
-                DATEDIFF(MINUTE, 
-                    TRY_CAST(LEFT(plan_time, 5) AS time),
-                    TRY_CAST(SUBSTRING(plan_time, CHARINDEX('-', plan_time) + 1, 5) AS time)
-                ) / 60.0
-            ELSE NULL 
-        END AS plan_time_hours,
-        CASE 
-            WHEN fact_time IS NOT NULL AND CHARINDEX('-', fact_time) > 0 THEN
-                DATEDIFF(MINUTE, 
-                    TRY_CAST(LEFT(fact_time, 5) AS time),
-                    TRY_CAST(SUBSTRING(fact_time, CHARINDEX('-', fact_time) + 1, 5) AS time)
-                ) / 60.0
-            ELSE NULL 
-        END AS fact_time_hours
-    FROM mfportal.dbo.mot_store_schedule
-)
-SELECT 
-    ROUND(SUM(plan_val_num), 4)    AS plan_sum_numeric,
-    ROUND(SUM(plan_time_hours), 4) AS plan_sum_time,
-    ROUND(SUM(plan_time_hours) - SUM(plan_val_num), 4) AS plan_delta,
-    ROUND(SUM(fact_val_num), 4)    AS fact_sum_numeric,
-    ROUND(SUM(fact_time_hours), 4) AS fact_sum_time,
-    ROUND(SUM(fact_time_hours) - SUM(fact_val_num), 4) AS fact_delta
-FROM parsed;
-
--- ============================================================
--- 7. Распределение дельты (plan_time - plan_value)
---    Показывает, что основная дельта = 1 час (обед)
--- ============================================================
-SELECT 
-    delta_hours,
-    COUNT(*) AS cnt
-FROM (
-    SELECT 
-        ROUND(
-            DATEDIFF(MINUTE, 
-                TRY_CAST(LEFT(plan_time, 5) AS time),
-                TRY_CAST(SUBSTRING(plan_time, CHARINDEX('-', plan_time) + 1, 5) AS time)
-            ) / 60.0 
-            - TRY_CAST(plan_value AS decimal(10,4)),
-            2
-        ) AS delta_hours
-    FROM mfportal.dbo.mot_store_schedule
-    WHERE plan_time IS NOT NULL 
-      AND TRY_CAST(plan_value AS decimal) IS NOT NULL
-) d
-GROUP BY delta_hours
-ORDER BY cnt DESC;
+GROUP BY 
+    [Dr_Cr], t.[CodePL], t.[Country], [Month], [ВГО],
+    [Scenario], t.[CodeCFO], t.[CFO], t.[GroupCFO1], t.[GroupCFO2],
+    t.[GroupCFO3], [Метод.нюансы], [Для отчета],
+    pl.[GroupPL], [GroupPL_new], pl.[Expense], [CF_item], [LFL_LISA],
+    cf.Ploschad, [RegManager], [DateOpen], [LfLStatus], [Компания],
+    sh.plan_hours_numeric, sh.plan_hours_shift, 
+    sh.fact_hours_numeric, sh.fact_hours_shift, sh.employee_days;
