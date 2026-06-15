@@ -161,10 +161,10 @@ SELECT
     ,t.[Country]
     ,[Month]
     ,[ВГО]
-    ,AVG([AmountBYN]) AS AmountBYN
-    ,AVG([Amount]) AS Amount
-    ,AVG([AmountUSD]) AS AmountUSD
-    ,AVG([AmountRUB]) AS AmountRUB
+    ,SUM([AmountBYN]) AS AmountBYN
+    ,SUM([Amount]) AS Amount
+    ,SUM([AmountUSD]) AS AmountUSD
+    ,SUM([AmountRUB]) AS AmountRUB
     ,[Scenario]
     ,t.[CodeCFO]
     ,t.[CFO]
