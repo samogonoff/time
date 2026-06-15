@@ -189,8 +189,6 @@ SELECT
     -- ==========================================
     -- Добавленные колонки планового/факт времени
     -- ==========================================
-    ,COALESCE(sh.plan_hours_numeric, 0) AS plan_hours_numeric  -- чистые рабочие часы (без обеда)
-    ,COALESCE(sh.plan_hours_shift, 0)   AS plan_hours_shift    -- время присутствия на смене (с обедом)
     ,COALESCE(sh.fact_hours_numeric, 0) AS fact_hours_numeric  -- чистые рабочие часы (без обеда)
     ,COALESCE(sh.fact_hours_shift, 0)   AS fact_hours_shift    -- время присутствия на смене (с обедом)
     ,COALESCE(sh.employee_days, 0)      AS employee_days       -- количество человеко-дней
@@ -212,5 +210,4 @@ GROUP BY
     t.[GroupCFO3], [Метод.нюансы], [Для отчета],
     pl.[GroupPL], [GroupPL_new], pl.[Expense], [CF_item], [LFL_LISA],
     cf.Ploschad, [RegManager], [DateOpen], [LfLStatus], [Компания],
-    sh.plan_hours_numeric, sh.plan_hours_shift, 
     sh.fact_hours_numeric, sh.fact_hours_shift, sh.employee_days;
