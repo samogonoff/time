@@ -2,7 +2,7 @@
 -- Анализ mot_store_schedule + план/факт время для Table_Fin_PL
 -- ============================================================
 
--- Связь: mot_store_schedule.klient_id = 001 CodeCFO.CodeCFO = Table_Fin_PL.CodeCFO
+-- Связь: mot_store_schedule.klient_id = 001 CodeCFO.CodeFOX
 
 -- ============================================================
 -- 1. Структура таблицы mot_store_schedule
@@ -121,6 +121,8 @@ ORDER BY klient_id, year_num, month_num;
 -- 6. ОСНОВНОЙ ЗАПРОС: Table_Fin_PL с плановым и фактическим временем
 --    Добавлены колонки plan_hours_numeric, plan_hours_shift,
 --    fact_hours_numeric, fact_hours_shift, employee_days
+--    Связь: mot_store_schedule.klient_id = 001 CodeCFO.CodeFOX
+--    (через cf: cf.CodeFOX = sh.klient_id)
 -- ============================================================
 WITH store_hours AS (
     SELECT 
@@ -198,9 +200,9 @@ LEFT JOIN [dbo].[002 CodePL] pl ON t.CodePL = pl.CodePL
 LEFT JOIN [dbo].[001 CodeCFO] cf ON t.CodeCFO = cf.CodeCFO
 
 -- LEFT JOIN агрегированных часов из mot_store_schedule
--- Связь: mot_store_schedule.klient_id = 001 CodeCFO.CodeCFO = Table_Fin_PL.CodeCFO
+-- Связь: mot_store_schedule.klient_id = 001 CodeCFO.CodeFOX
 LEFT JOIN store_hours sh 
-    ON CAST(sh.klient_id AS NVARCHAR(22)) = t.CodeCFO
+    ON cf.CodeFOX = sh.klient_id
     AND sh.year_num = YEAR(t.Month)
     AND sh.month_num = MONTH(t.Month)
 
